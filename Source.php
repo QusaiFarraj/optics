@@ -1,4 +1,5 @@
-#!/usr/bin/phpi
+#!/usr/bin/php
+
 <?php
     //abstract base class for in-memory representation of various business entities.  The only item
     //we have implemented at this point is InventoryItem (see below).
@@ -189,9 +190,10 @@
     }
     
     //This class managed in-memory entities and commmunicates with the storage class (DataStore in our case).
-    class EntityManager
+    class EntityManager implements \SplSubject{
     {
-        
+        private $observers = array();
+
         protected $_entities = array();
         
         protected $_entityIdToPrimary = array();
@@ -217,6 +219,21 @@
                 foreach ($itemKeys as $itemKey) {
                     $entity = $this->create($itemType, $this->_dataStore->get($itemType, $itemKey), true);
                 }        
+            }
+        }
+
+        //add observer
+        public function attach(\SplObserver $observer) {
+            $this->observers[] = $observer;
+        }
+        
+        //remove observer
+        public function detach(\SplObserver $observer) {
+            
+            $key = array_search($observer,$this->observers, true);
+            
+            if(!empty($key)){
+                unset($this->observers[$key]);
             }
         }
 
@@ -259,6 +276,8 @@
             }
             $entity->_data = $newData;
             
+            $this->notify($entity);
+
             return $entity;
         }
         
@@ -294,6 +313,12 @@
                 $this->_dataStore->set(get_class($entity),$entity->{$entity->getPrimary()},$entity->_data);
             }
             $this->_dataStore->save();
+        }
+
+        public function notify($entity) {
+            foreach ($this->observers as $observer) {
+                $observer->update($entity);
+            }
         }
     }
     
@@ -344,11 +369,79 @@
             return "sku";
         }
     }
-    
+
+    // creating an Observer to save changes to log.txt
+    class EntityManagerTextObserver implements \SplObserver
+    {
+        private $filename;
+
+        public function __construct()
+        {
+            $this->filename = "info_logs.data";
+        }
+
+        protected function checkFile($filename=null)
+        {
+            if (!file_exists($this->filename)) {
+                if (!touch($this->filename)) {
+                    throw new Exception("Could not create file");
+                }
+                if (!chmod($this->filename, 0660)) {
+                    throw new Exception("Could not set read/write on file. ");
+                }
+            }
+            if (!is_readable($this->filename) || !is_writable($this->filename)) {
+                throw new Exception("Data store file $filename must be readable/writable.");
+            }
+
+        }
+
+        public function update(Entity $entity=null)
+        {
+            $this->checkFile($this->filename);
+
+            $content = 'Entity has been updated. Info: '. $entity->get('sku'));
+            
+            // save logs
+            $result = file_put_contents($this->filename, serialize($content));
+
+            if ($result === null) {
+                throw new Exception("error writting to $this->filename");
+            }
+
+        }
+    }
+
+    // creating an Observer to email you with changes
+    class EntityManagerEmailObserver implements \SplObserver
+    {
+        private $to;
+        private $msg;
+
+        public function __construct()
+        {
+            $this->to = "me@example.com";
+            $this->subj = 'Entity updated';
+        }
+
+        public function update(Entity $entity = null)
+        {
+            $msg = 'Items quantity has reached below 5 items. item-sku: '. $entity->get('sku') .' and current qoh: ' . $$entity->get('qoh');
+            mail($this->to,$this->subj, $msg);
+        }
+    }
+
     function driver()
     {
         $dataStorePath = "data_store_file.data";
         $entityManager = new EntityManager($dataStorePath);
+
+        // set up the observer
+        $logObserver = new EntityManagerTextObserver();
+        $emailObserver = new EntityManagerEmailObserver();
+        $entityManager->attach($logObserver);
+        $entityManager->attach($emailObserver);
+
         Entity::setDefaultEntityManager($entityManager);
         //create five new Inventory items
         
