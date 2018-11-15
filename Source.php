@@ -190,7 +190,7 @@
     }
     
     //This class managed in-memory entities and commmunicates with the storage class (DataStore in our case).
-    class EntityManager implements \SplSubject{
+    class EntityManager implements \SplSubject
     {
         private $observers = array();
 
@@ -315,9 +315,9 @@
             $this->_dataStore->save();
         }
 
-        public function notify($entity) {
+        public function notify($entity=null) {
             foreach ($this->observers as $observer) {
-                $observer->update($entity);
+                $observer->update($this, $entity);
             }
         }
     }
@@ -374,41 +374,23 @@
     class EntityManagerTextObserver implements \SplObserver
     {
         private $filename;
+        private $mode;
 
         public function __construct()
         {
             $this->filename = "info_logs.data";
+            $this->mode = file_exists($this->filename) ? 'a' : 'w';
         }
 
-        protected function checkFile($filename=null)
+        public function update(\SplSubject $subject, Entity $entity=null)
         {
-            if (!file_exists($this->filename)) {
-                if (!touch($this->filename)) {
-                    throw new Exception("Could not create file");
-                }
-                if (!chmod($this->filename, 0660)) {
-                    throw new Exception("Could not set read/write on file. ");
-                }
-            }
-            if (!is_readable($this->filename) || !is_writable($this->filename)) {
-                throw new Exception("Data store file $filename must be readable/writable.");
-            }
+            $file = fopen($this->filename, $this->mode) or die("Unable to open file!");
 
-        }
-
-        public function update(Entity $entity=null)
-        {
-            $this->checkFile($this->filename);
-
-            $content = 'Entity has been updated. Info: '. $entity->get('sku'));
+            $content = "Entity has been updated. Info=> SKU: $entity->sku, QOH: $entity->qoh \n";
             
-            // save logs
-            $result = file_put_contents($this->filename, serialize($content));
+            fwrite($file, $content);
 
-            if ($result === null) {
-                throw new Exception("error writting to $this->filename");
-            }
-
+            fclose($file);
         }
     }
 
@@ -420,14 +402,16 @@
 
         public function __construct()
         {
-            $this->to = "me@example.com";
+            $this->to = "qusai919@gmail.com";
             $this->subj = 'Entity updated';
         }
 
-        public function update(Entity $entity = null)
+        public function update(SplSubject $subject, Entity $entity = null)
         {
-            $msg = 'Items quantity has reached below 5 items. item-sku: '. $entity->get('sku') .' and current qoh: ' . $$entity->get('qoh');
-            mail($this->to,$this->subj, $msg);
+            if ($entity->qoh < 5) {
+                $msg = 'Items quantity has reached below 5 items. item-sku: '. serialize($entity->sku) .' and current qoh: ' . serialize($entity->qoh);
+                mail($this->to,$this->subj, wordwrap($msg));
+            }
         }
     }
 
@@ -440,7 +424,7 @@
         $logObserver = new EntityManagerTextObserver();
         $emailObserver = new EntityManagerEmailObserver();
         $entityManager->attach($logObserver);
-        $entityManager->attach($emailObserver);
+        // $entityManager->attach($emailObserver); // commented out due to hosting issues
 
         Entity::setDefaultEntityManager($entityManager);
         //create five new Inventory items
